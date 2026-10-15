@@ -1,0 +1,22 @@
+{
+  "name": "cloudcare-hospital-system",
+  "version": "1.0.0",
+  "description": "CloudCare - Hospital Appointment Booking System Using AWS (2nd-Year B.Tech CSE Mini Project)",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "install:all": "npm --prefix frontend install"
+  },
+  "keywords": [
+    "hospital-management",
+    "appointment-booking",
+    "aws",
+    "react",
+    "vite",
+    "serverless"
+  ],
+  "author": "",
+  "license": "MIT"
+}
