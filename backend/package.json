@@ -1,0 +1,23 @@
+{
+  "name": "cloudcare-backend",
+  "version": "1.0.0",
+  "description": "CloudCare Hospital Appointment Booking System - AWS Lambda Backend Microservices",
+  "main": "functions/appointments/createAppointment.js",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.750.0",
+    "@aws-sdk/lib-dynamodb": "^3.750.0",
+    "@aws-sdk/client-ses": "^3.750.0"
+  },
+  "keywords": [
+    "aws-lambda",
+    "dynamodb",
+    "serverless",
+    "hospital-booking"
+  ],
+  "author": "",
+  "license": "MIT"
+}

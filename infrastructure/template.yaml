@@ -1,0 +1,228 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CloudCare - Hospital Appointment Booking System Serverless Architecture.
+  Provides Amazon Cognito User Pools, Amazon DynamoDB, AWS Lambda Functions, and Amazon API Gateway.
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 256
+    Runtime: nodejs20.x
+    Environment:
+      Variables:
+        DYNAMODB_TABLE: !Ref CloudCareTable
+        ENABLE_SES: 'false' # Switch to 'true' once Amazon SES sender identity is verified
+        SES_SENDER_EMAIL: 'no-reply@cloudcare-health.local'
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod, test]
+
+Resources:
+  # =========================================================================
+  # 1. AMAZON COGNITO AUTHENTICATION & RBAC GROUPS
+  # =========================================================================
+  CloudCareUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub CloudCare-UserPool-${Stage}
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      Schema:
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: phone_number
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+
+  CloudCareUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub CloudCare-WebClient-${Stage}
+      UserPoolId: !Ref CloudCareUserPool
+      GenerateSecret: false # Must be FALSE for Browser SPAs (React)
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  # Role Groups in Cognito
+  PatientsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Patient
+      Description: Registered patients booking hospital appointments
+      UserPoolId: !Ref CloudCareUserPool
+      Precedence: 3
+
+  DoctorsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Doctor
+      Description: Hospital physicians managing OPD consultations
+      UserPoolId: !Ref CloudCareUserPool
+      Precedence: 2
+
+  AdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Admin
+      Description: Hospital administrators managing faculty and operations
+      UserPoolId: !Ref CloudCareUserPool
+      Precedence: 1
+
+  # =========================================================================
+  # 2. AMAZON DYNAMODB (Single-Table Design, Pay-Per-Request Free Tier Safe)
+  # =========================================================================
+  CloudCareTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub CloudCare_HospitalTable_${Stage}
+      BillingMode: PAY_PER_REQUEST # Zero fixed monthly cost (pay only per request)
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1 # Patient Query Index
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2 # Doctor Query Index
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # =========================================================================
+  # 3. AMAZON API GATEWAY (REST API with Cognito Authorizer)
+  # =========================================================================
+  CloudCareApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt CloudCareUserPool.Arn
+            Identity:
+              Header: Authorization
+
+  # =========================================================================
+  # 4. AWS LAMBDA SERVERLESS MICROSERVICES
+  # =========================================================================
+  CreateAppointmentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: functions/appointments/createAppointment.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CloudCareTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: '*'
+      Events:
+        CreateAppointment:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudCareApi
+            Path: /appointments
+            Method: POST
+
+  GetAppointmentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: functions/appointments/getAppointments.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CloudCareTable
+      Events:
+        GetAppointments:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudCareApi
+            Path: /appointments
+            Method: GET
+
+  CancelAppointmentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: functions/appointments/cancelAppointment.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CloudCareTable
+      Events:
+        CancelAppointment:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CloudCareApi
+            Path: /appointments/{id}/cancel
+            Method: POST
+
+Outputs:
+  Region:
+    Description: AWS Deployment Region
+    Value: !Ref AWS::Region
+
+  UserPoolId:
+    Description: Amazon Cognito User Pool ID (paste into VITE_COGNITO_USER_POOL_ID)
+    Value: !Ref CloudCareUserPool
+
+  UserPoolClientId:
+    Description: Amazon Cognito App Client ID (paste into VITE_COGNITO_CLIENT_ID)
+    Value: !Ref CloudCareUserPoolClient
+
+  ApiBaseUrl:
+    Description: Amazon API Gateway Base URL (paste into VITE_API_BASE_URL)
+    Value: !Sub https://${CloudCareApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
+
+  DynamoDBTableName:
+    Description: DynamoDB Table Name
+    Value: !Ref CloudCareTable
