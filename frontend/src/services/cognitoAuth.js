@@ -75,6 +75,22 @@ export function extractRoleFromClaims(claims) {
 const STORAGE_KEY = "cloudcare_auth_session";
 
 /**
+ * Formats a phone number to standard E.164 format (+<country_code><number>)
+ * as strictly required by Amazon Cognito. Defaults to +91 if no country code provided.
+ */
+export function formatToE164(phone, defaultCountryCode = "+91") {
+  if (!phone) return "";
+  const cleaned = phone.replace(/[\s\-\(\)]/g, "");
+  if (cleaned.startsWith("+")) {
+    return cleaned;
+  }
+  if (cleaned.startsWith("0")) {
+    return `${defaultCountryCode}${cleaned.substring(1)}`;
+  }
+  return `${defaultCountryCode}${cleaned}`;
+}
+
+/**
  * Signs up a new user via Amazon Cognito User Pools.
  */
 export async function registerUser({ name, email, password, phone }) {
@@ -84,13 +100,17 @@ export async function registerUser({ name, email, password, phone }) {
     );
   }
 
+  if (!phone || !phone.trim()) {
+    throw new Error("Mobile phone number is required by your Amazon Cognito User Pool schema.");
+  }
+
+  const formattedPhone = formatToE164(phone);
+
   const client = getCognitoClient();
   const userAttributes = [
-    { Name: "name", Value: name }
+    { Name: "name", Value: name },
+    { Name: "phone_number", Value: formattedPhone }
   ];
-  if (phone) {
-    userAttributes.push({ Name: "phone_number", Value: phone });
-  }
 
   const command = new SignUpCommand({
     ClientId: clientId,

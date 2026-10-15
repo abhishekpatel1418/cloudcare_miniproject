@@ -39,6 +39,12 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialTab =
     e.preventDefault();
     setErrorMessage('');
     setSuccessNotice('');
+
+    if (!phone || phone.trim().length < 8) {
+      setErrorMessage('Please enter a valid mobile phone number (minimum 8 digits, e.g. +91 98765 43210).');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -308,17 +314,21 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialTab =
 
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--dark-700)', marginBottom: '4px' }}>
-                Mobile Phone (Optional)
+                Mobile Phone (Required by Cognito Schema)
               </label>
               <div className="input-with-icon">
                 <Phone size={16} className="input-icon" />
                 <input
                   type="tel"
+                  required
                   placeholder="+91 98765 43210"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                 />
               </div>
+              <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', display: 'block', marginTop: '4px' }}>
+                Enter your 10-digit number or with country code (e.g. +91 98765 43210)
+              </span>
             </div>
 
             <div style={{ 
