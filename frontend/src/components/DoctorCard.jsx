@@ -1,8 +1,13 @@
 import React from 'react';
 import { Star, Clock, MapPin, CheckCircle, Calendar, ArrowRight } from 'lucide-react';
+import { getDoctorSchedule } from '../services/doctorScheduleService';
 
 export default function DoctorCard({ doctor, onBookClick, onViewProfile }) {
   const isAvailableToday = doctor.availableToday;
+  const schedule = getDoctorSchedule(doctor?.id);
+  const displaySlots = schedule?.generatedSlots && schedule.generatedSlots.length > 0 
+    ? schedule.generatedSlots 
+    : (doctor?.availableSlots || []);
 
   return (
     <div className="doctor-card">
@@ -55,15 +60,15 @@ export default function DoctorCard({ doctor, onBookClick, onViewProfile }) {
         </div>
 
         <div className="slots-grid">
-          {doctor.availableSlots.slice(0, 3).map((slot, index) => (
+          {displaySlots.slice(0, 3).map((slot, index) => (
             <span key={index} className="slot-tag">
               <Clock size={12} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
               {slot}
             </span>
           ))}
-          {doctor.availableSlots.length > 3 && (
+          {displaySlots.length > 3 && (
             <span className="slot-tag" style={{ background: 'var(--gray-200)' }}>
-              +{doctor.availableSlots.length - 3} more
+              +{displaySlots.length - 3} more
             </span>
           )}
         </div>

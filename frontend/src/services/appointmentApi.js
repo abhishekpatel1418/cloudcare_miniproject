@@ -1,4 +1,5 @@
 import { getStoredSession } from "./cognitoAuth";
+import { getDoctorSchedule } from "./doctorScheduleService";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -104,9 +105,20 @@ export async function createAppointment(appointmentData) {
 
   // 2. Local State Engine (emulating DynamoDB TransactWrite & ConditionExpression)
   const existingList = getLocalAppointments();
+  const schedule = getDoctorSchedule(appointmentData.doctorId);
 
-  // Validate duplicate slot booking
-  const isDuplicate = existingList.some(
+  // Validate working day
+  if (appointmentData.date && Array.isArray(schedule.workingDays) && schedule.workingDays.length > 0) {
+    const dateObj = new Date(`${appointmentData.date}T00:00:00`);
+    const dayName = dateObj.toLocaleDateString("en-US", { weekday: "long" });
+    if (!schedule.workingDays.includes(dayName)) {
+      throw new Error(`Dr. ${appointmentData.doctorName} does not have OPD consultation hours on ${dayName}s.`);
+    }
+  }
+
+  // Validate slot capacity (maxBookingsPerSlot)
+  const maxPerSlot = schedule.maxBookingsPerSlot || 1;
+  const slotBookings = existingList.filter(
     (app) =>
       app.doctorId === appointmentData.doctorId &&
       app.date === appointmentData.date &&
@@ -114,9 +126,24 @@ export async function createAppointment(appointmentData) {
       app.status !== "CANCELLED"
   );
 
-  if (isDuplicate) {
+  if (slotBookings.length >= maxPerSlot) {
     throw new Error(
-      `This time slot (${appointmentData.slot}) on ${appointmentData.date} is already reserved for ${appointmentData.doctorName}. Please select another time slot.`
+      `This time slot (${appointmentData.slot}) on ${appointmentData.date} is fully booked (capacity: ${maxPerSlot}). Please select another time slot.`
+    );
+  }
+
+  // Validate daily maximum booking limit
+  const dailyMax = schedule.dailyMaxBookings || 15;
+  const dayBookings = existingList.filter(
+    (app) =>
+      app.doctorId === appointmentData.doctorId &&
+      app.date === appointmentData.date &&
+      app.status !== "CANCELLED"
+  );
+
+  if (dayBookings.length >= dailyMax) {
+    throw new Error(
+      `Dr. ${appointmentData.doctorName} has reached the maximum daily limit of ${dailyMax} appointments on ${appointmentData.date}. Please select another date.`
     );
   }
 
@@ -211,4 +238,11 @@ export async function cancelAppointment(appointmentId) {
   saveLocalAppointments(list);
 
   return list[index];
+}
+
+/**
+ * Returns all stored appointments (used for cross-referencing availability).
+ */
+export function getAllAppointments() {
+  return getLocalAppointments();
 }

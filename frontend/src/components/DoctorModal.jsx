@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, 
   Calendar, 
@@ -12,17 +12,40 @@ import {
   Phone, 
   Mail, 
   AlertCircle,
-  LogIn
+  LogIn,
+  AlertTriangle
 } from 'lucide-react';
-import { createAppointment } from '../services/appointmentApi';
+import { createAppointment, getAllAppointments } from '../services/appointmentApi';
+import { getDoctorAvailabilityForDate } from '../services/doctorScheduleService';
 
 export default function DoctorModal({ doctor, onClose, user, onRequireAuth }) {
-  const [selectedSlot, setSelectedSlot] = useState(doctor?.availableSlots?.[0] || '');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedSlot, setSelectedSlot] = useState('');
   const [patientPhone, setPatientPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [confirmedBooking, setConfirmedBooking] = useState(null);
+
+  // Compute live availability from doctor schedule and booked appointments
+  const availability = useMemo(() => {
+    if (!doctor) return null;
+    return getDoctorAvailabilityForDate(doctor.id, selectedDate, getAllAppointments());
+  }, [doctor?.id, selectedDate]);
+
+  // Synchronize selected slot when date or schedule changes
+  useEffect(() => {
+    if (availability && availability.isWorkingDay && !availability.isDailyLimitReached) {
+      const openSlots = availability.slots.filter((s) => !s.isBooked);
+      const isCurrentSlotOpen = openSlots.some((s) => s.slot === selectedSlot);
+      if (!isCurrentSlotOpen && openSlots.length > 0) {
+        setSelectedSlot(openSlots[0].slot);
+      } else if (openSlots.length === 0) {
+        setSelectedSlot('');
+      }
+    } else {
+      setSelectedSlot('');
+    }
+  }, [availability, selectedDate]);
 
   if (!doctor) return null;
 
@@ -30,6 +53,21 @@ export default function DoctorModal({ doctor, onClose, user, onRequireAuth }) {
     e.preventDefault();
     if (!user) {
       onRequireAuth();
+      return;
+    }
+
+    if (!availability?.isWorkingDay) {
+      setErrorMessage(`Dr. ${doctor.name} does not have OPD consultation hours on ${availability?.dayName || 'selected day'}.`);
+      return;
+    }
+
+    if (availability?.isDailyLimitReached) {
+      setErrorMessage(`Daily booking limit reached for this date. Please choose another date.`);
+      return;
+    }
+
+    if (!selectedSlot) {
+      setErrorMessage('Please select an available consultation slot.');
       return;
     }
 
@@ -211,33 +249,127 @@ export default function DoctorModal({ doctor, onClose, user, onRequireAuth }) {
                   </div>
                 </div>
 
-                {/* Slot Selector */}
+                {/* Slot Selector & Schedule Rules */}
                 <div style={{ marginBottom: '18px' }}>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--dark-800)', marginBottom: '8px' }}>
-                    Select Consultation Slot:
-                  </label>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {doctor.availableSlots.map((slot) => (
-                      <button
-                        type="button"
-                        key={slot}
-                        onClick={() => setSelectedSlot(slot)}
-                        style={{
-                          padding: '8px 14px',
-                          borderRadius: 'var(--radius-md)',
-                          fontSize: '0.84rem',
-                          fontWeight: 600,
-                          border: selectedSlot === slot ? '2px solid var(--primary)' : '1px solid var(--gray-300)',
-                          backgroundColor: selectedSlot === slot ? 'var(--primary-light)' : 'var(--white)',
-                          color: selectedSlot === slot ? 'var(--primary-hover)' : 'var(--dark-800)',
-                          transition: 'var(--transition)'
-                        }}
-                      >
-                        <Clock size={13} style={{ display: 'inline', marginRight: '5px', verticalAlign: '-1px' }} />
-                        {slot}
-                      </button>
-                    ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--dark-800)' }}>
+                      Select Consultation Slot:
+                    </label>
+                    {availability?.isWorkingDay && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)' }}>
+                        Bookings on {selectedDate}: {availability.dailyBookingsCount} / {availability.dailyMaxBookings}
+                      </span>
+                    )}
                   </div>
+
+                  {!availability?.isWorkingDay ? (
+                    <div style={{
+                      padding: '12px 14px',
+                      background: '#fff1f2',
+                      border: '1px solid #fecdd3',
+                      borderRadius: 'var(--radius-md)',
+                      color: '#be123c',
+                      fontSize: '0.84rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}>
+                      <AlertTriangle size={16} />
+                      <span>
+                        Dr. {doctor.name} does not have OPD consultation hours on <strong>{availability?.dayName}s</strong>. Please select another date.
+                      </span>
+                    </div>
+                  ) : availability.isDailyLimitReached ? (
+                    <div style={{
+                      padding: '12px 14px',
+                      background: '#fff1f2',
+                      border: '1px solid #fecdd3',
+                      borderRadius: 'var(--radius-md)',
+                      color: '#be123c',
+                      fontSize: '0.84rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}>
+                      <AlertCircle size={16} />
+                      <span>
+                        Daily maximum capacity reached ({availability.dailyMaxBookings} bookings). No further appointments can be booked on this date.
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {availability.slots.map((item) => {
+                        const isSelected = selectedSlot === item.slot;
+                        const isBooked = item.isBooked;
+
+                        if (isBooked) {
+                          return (
+                            <button
+                              type="button"
+                              key={item.slot}
+                              disabled
+                              style={{
+                                padding: '8px 12px',
+                                borderRadius: 'var(--radius-md)',
+                                fontSize: '0.82rem',
+                                fontWeight: 600,
+                                border: '1px solid var(--gray-200)',
+                                backgroundColor: 'var(--gray-100)',
+                                color: 'var(--gray-400)',
+                                cursor: 'not-allowed',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px'
+                              }}
+                              title="This slot is fully booked for this date"
+                            >
+                              <Clock size={12} />
+                              <span>{item.slot}</span>
+                              <span style={{
+                                fontSize: '0.68rem',
+                                background: '#ffe4e6',
+                                color: '#be123c',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                fontWeight: 700
+                              }}>
+                                Full
+                              </span>
+                            </button>
+                          );
+                        }
+
+                        return (
+                          <button
+                            type="button"
+                            key={item.slot}
+                            onClick={() => setSelectedSlot(item.slot)}
+                            style={{
+                              padding: '8px 14px',
+                              borderRadius: 'var(--radius-md)',
+                              fontSize: '0.84rem',
+                              fontWeight: 600,
+                              border: isSelected ? '2px solid var(--primary)' : '1px solid var(--gray-300)',
+                              backgroundColor: isSelected ? 'var(--primary-light)' : 'var(--white)',
+                              color: isSelected ? 'var(--primary-hover)' : 'var(--dark-800)',
+                              transition: 'var(--transition)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            <Clock size={13} />
+                            <span>{item.slot}</span>
+                            {item.maxBookings > 1 && (
+                              <span style={{ fontSize: '0.7rem', color: 'var(--gray-500)' }}>
+                                ({item.currentBookings}/{item.maxBookings})
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Patient Summary Card */}
